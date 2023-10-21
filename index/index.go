@@ -12,6 +12,26 @@ type Indexer interface {
 	Delete(key []byte) bool                      // 删除某个key的索引
 }
 
+type IndexerType int8
+
+const (
+	TypeBTree IndexerType = iota + 1
+	TypeART
+)
+
+// NewIndexer 根据类型初始化索引
+func NewIndexer(typ IndexerType) Indexer {
+	switch typ {
+	case TypeBTree:
+		return NewBTree()
+	case TypeART:
+		//TODO
+		return nil
+	default:
+		panic("unsupported indexer type")
+	}
+}
+
 // Item 存储在BTree中的对象，实现Less方法
 type Item struct {
 	key []byte

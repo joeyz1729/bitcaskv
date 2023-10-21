@@ -9,4 +9,6 @@ var (
 
 	ErrKeyNotFound      = errors.New("key not exist")
 	ErrDataFileNotFound = errors.New("data file not found")
+
+	ErrDataDirectoryCorrupted = errors.New("the database directory maybe corrupted")
 )

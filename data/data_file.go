@@ -2,6 +2,8 @@ package data
 
 import "bitcaskv/fio"
 
+const DataFileNameSuffix = ".data"
+
 // DataFile 数据文件
 type DataFile struct {
 	FileId    uint32 // 文件id
@@ -15,9 +17,9 @@ func OpenDataFile(dirPath string, fileId uint32) (*DataFile, error) {
 	return nil, nil
 }
 
-func (dataFile *DataFile) ReadLogRecord(offset int64) (*LogRecord, error) {
+func (dataFile *DataFile) ReadLogRecord(offset int64) (*LogRecord, int64, error) {
 	//TODO
-	return nil, nil
+	return nil, 0, nil
 }
 
 func (dataFile *DataFile) Write(buf []byte) error {
