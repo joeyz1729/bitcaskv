@@ -12,13 +12,6 @@ type Indexer interface {
 	Delete(key []byte) bool                      // 删除某个key的索引
 }
 
-type IOManager interface {
-	Read([]byte, int64) (int, error)
-	Write([]byte) (int, error)
-	Sync() error
-	Close() error
-}
-
 // Item 存储在BTree中的对象，实现Less方法
 type Item struct {
 	key []byte
