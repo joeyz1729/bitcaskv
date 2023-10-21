@@ -110,6 +110,30 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 
 }
 
+func (db *DB) Delete(key []byte) error {
+	if len(key) == 0 {
+		return ErrKeyIsEmpty
+	}
+	// 判断是否存在
+	if pos := db.index.Get(key); pos == nil {
+		return nil
+	}
+	// 添加删除的entry
+	logRecord := &data.LogRecord{
+		Key:  key,
+		Type: data.LogRecordDeleted,
+	}
+	_, err := db.appendLogRecord(logRecord)
+	if err != nil {
+		return err
+	}
+	ok := db.index.Delete(key)
+	if !ok {
+		return ErrIndexUpdateFailed
+	}
+	return nil
+}
+
 // appendLogRecord 添加数据并返回记录的位置信息
 func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, error) {
 	db.mu.Lock()
