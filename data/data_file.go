@@ -1,6 +1,17 @@
 package data
 
-import "bitcaskv/fio"
+import (
+	"bitcaskv/fio"
+	"errors"
+	"fmt"
+	"hash/crc32"
+	"io"
+	"path/filepath"
+)
+
+var (
+	ErrInvalidCRC = errors.New("invalid crc value, log record maybe corrupted")
+)
 
 const DataFileNameSuffix = ".data"
 
@@ -13,21 +24,94 @@ type DataFile struct {
 
 // OpenDataFile 打开数据文件
 func OpenDataFile(dirPath string, fileId uint32) (*DataFile, error) {
-	//TODO
-	return nil, nil
+	fileName := filepath.Join(dirPath, fmt.Sprintf("%09d", fileId)+DataFileNameSuffix)
+	ioManager, err := fio.NewFileIOManager(fileName)
+	if err != nil {
+		return nil, err
+	}
+	return &DataFile{
+		FileId:    fileId,
+		WriteOff:  0,
+		IoManager: ioManager,
+	}, nil
+
 }
 
-func (dataFile *DataFile) ReadLogRecord(offset int64) (*LogRecord, int64, error) {
-	//TODO
-	return nil, 0, nil
+// ReadLogRecord 根据offset从datafile中读取一条记录, 返回记录和读到的长度
+func (df *DataFile) ReadLogRecord(offset int64) (*LogRecord, int64, error) {
+	fileSize, err := df.IoManager.Size()
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// 0. 判断max header size 是否超过文件大小
+	var headerBytes int64 = maxLogRecordHeaderSize
+	if offset+maxLogRecordHeaderSize > fileSize {
+		headerBytes = fileSize - offset
+	}
+
+	// 1. 首先读取头部信息
+	headerBuf, err := df.readNBytes(headerBytes, offset)
+	if err != nil {
+		return nil, 0, err
+	}
+
+	// 1.1 解码
+	header, headerSize := decodeLogRecordHeader(headerBuf)
+	if header == nil {
+		return nil, 0, io.EOF
+	}
+
+	// 1.1 校验
+	if header.crc == 0 && header.keySize == 0 && header.valueSize == 0 {
+		return nil, 0, io.EOF
+	}
+	keySize, valueSize := int64(header.keySize), int64(header.valueSize)
+	var recordSize = headerSize + keySize + valueSize
+
+	// 2 读取记录
+	logRecord := &LogRecord{Type: header.recordType}
+	if keySize > 0 || valueSize > 0 {
+		kvBuf, err := df.readNBytes(keySize+valueSize, offset+headerSize)
+		if err != nil {
+			return nil, 0, err
+		}
+		logRecord.Key = kvBuf[:keySize]
+		logRecord.Value = kvBuf[keySize:]
+	}
+
+	// 3. 校验crc是否正确
+	crc := getLogRecordCRC(logRecord, headerBuf[crc32.Size:headerSize])
+	if crc != header.crc {
+		return nil, 0, ErrInvalidCRC
+	}
+	return nil, recordSize, nil
 }
 
-func (dataFile *DataFile) Write(buf []byte) error {
-	//TODO
+func (df *DataFile) Write(buf []byte) error {
+	n, err := df.IoManager.Write(buf)
+	if err != nil {
+		return err
+	}
+	df.WriteOff += int64(n)
 	return nil
 }
 
-func (dataFile *DataFile) Sync() error {
-	//TODO
-	return nil
+func (df *DataFile) Sync() error {
+	return df.IoManager.Sync()
+}
+
+func (df *DataFile) Close() error {
+	return df.IoManager.Close()
+}
+
+func (df *DataFile) readNBytes(n int64, offset int64) (b []byte, err error) {
+	b = make([]byte, n)
+	_, err = df.IoManager.Read(b, offset)
+	return
+}
+
+func getLogRecordCRC(lr *LogRecord, header []byte) uint32 {
+	// TODO
+	return 0
 }
