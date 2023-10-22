@@ -71,45 +71,66 @@ func TestBTree_Delete(t *testing.T) {
 	//	assert.Equal(t, res4.Offset, int64(33))
 }
 
-//
-//func TestBTree_Iterator(t *testing.T) {
-//	bt1 := NewBTree()
-//	// 1.BTree 为空的情况
-//	iter1 := bt1.Iterator(false)
-//	assert.Equal(t, false, iter1.Valid())
-//
-//	//	2.BTree 有数据的情况
-//	bt1.Put([]byte("ccde"), &data.LogRecordPos{Fid: 1, Offset: 10})
-//	iter2 := bt1.Iterator(false)
-//	assert.Equal(t, true, iter2.Valid())
-//	assert.NotNil(t, iter2.Key())
-//	assert.NotNil(t, iter2.Value())
-//	iter2.Next()
-//	assert.Equal(t, false, iter2.Valid())
-//
-//	// 3.有多条数据
-//	bt1.Put([]byte("acee"), &data.LogRecordPos{Fid: 1, Offset: 10})
-//	bt1.Put([]byte("eede"), &data.LogRecordPos{Fid: 1, Offset: 10})
-//	bt1.Put([]byte("bbcd"), &data.LogRecordPos{Fid: 1, Offset: 10})
-//	iter3 := bt1.Iterator(false)
-//	for iter3.Rewind(); iter3.Valid(); iter3.Next() {
-//		assert.NotNil(t, iter3.Key())
-//	}
-//
-//	iter4 := bt1.Iterator(true)
-//	for iter4.Rewind(); iter4.Valid(); iter4.Next() {
-//		assert.NotNil(t, iter4.Key())
-//	}
-//
-//	// 4.测试 seek
-//	iter5 := bt1.Iterator(false)
-//	for iter5.Seek([]byte("cc")); iter5.Valid(); iter5.Next() {
-//		assert.NotNil(t, iter5.Key())
-//	}
-//
-//	// 5.反向遍历的 seek
-//	iter6 := bt1.Iterator(true)
-//	for iter6.Seek([]byte("zz")); iter6.Valid(); iter6.Next() {
-//		assert.NotNil(t, iter6.Key())
-//	}
-//}
+func TestBTree_Iterator1(t *testing.T) {
+	bt1 := NewBTree()
+	// 1.BTree 为空的情况
+	iter1 := bt1.Iterator(false)
+	assert.Equal(t, false, iter1.Valid())
+	//t.Log(iter1.Valid())
+
+}
+
+func TestBTree_Iterator2(t *testing.T) {
+	bt1 := NewBTree()
+	//	2.BTree 有数据的情况
+	bt1.Put([]byte("ccde"), &data.LogRecordPos{Fid: 1, Offset: 10})
+	iter2 := bt1.Iterator(false)
+	assert.Equal(t, true, iter2.Valid())
+	assert.NotNil(t, iter2.Key())
+	assert.NotNil(t, iter2.Value())
+	iter2.Next()
+	assert.Equal(t, false, iter2.Valid())
+
+}
+
+func TestBTree_Iterator3(t *testing.T) {
+	bt1 := NewBTree()
+	// 3.有多条数据
+	bt1.Put([]byte("acee"), &data.LogRecordPos{Fid: 1, Offset: 10})
+	bt1.Put([]byte("eede"), &data.LogRecordPos{Fid: 1, Offset: 10})
+	bt1.Put([]byte("bbcd"), &data.LogRecordPos{Fid: 1, Offset: 10})
+	iter3 := bt1.Iterator(false)
+	for iter3.Rewind(); iter3.Valid(); iter3.Next() {
+		assert.NotNil(t, iter3.Key())
+		//t.Log(string(iter3.Key()))
+	}
+
+	iter4 := bt1.Iterator(true)
+	for iter4.Rewind(); iter4.Valid(); iter4.Next() {
+		assert.NotNil(t, iter4.Key())
+		//t.Log(string(iter4.Key()))
+	}
+}
+
+func TestBTree_Iterator(t *testing.T) {
+	bt1 := NewBTree()
+	// 4.测试 seek
+	bt1.Put([]byte("acee"), &data.LogRecordPos{Fid: 1, Offset: 10})
+	bt1.Put([]byte("eede"), &data.LogRecordPos{Fid: 1, Offset: 10})
+	bt1.Put([]byte("bbcd"), &data.LogRecordPos{Fid: 1, Offset: 10})
+	iter5 := bt1.Iterator(false)
+	// 输出比ad大的数据
+	for iter5.Seek([]byte("ad")); iter5.Valid(); iter5.Next() {
+		t.Log(string(iter5.Key()))
+		assert.NotNil(t, iter5.Key())
+		//t.Log(string(iter5.Key()))
+	}
+
+	// 5.反向遍历的 seek， 反向输出比zz小的数据
+	iter6 := bt1.Iterator(true)
+	for iter6.Seek([]byte("zz")); iter6.Valid(); iter6.Next() {
+		t.Log(string(iter6.Key()))
+		assert.NotNil(t, iter6.Key())
+
+	}
+}

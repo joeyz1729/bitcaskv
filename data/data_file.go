@@ -84,7 +84,7 @@ func (df *DataFile) ReadLogRecord(offset int64) (*LogRecord, int64, error) {
 	if crc != header.crc {
 		return nil, 0, ErrInvalidCRC
 	}
-	return nil, recordSize, nil
+	return logRecord, recordSize, nil
 }
 
 // Write 将数据写入

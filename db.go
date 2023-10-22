@@ -31,7 +31,7 @@ func Open(options Options) (*DB, error) {
 		return nil, err
 	}
 	// 如果数据库目录不存在则创建
-	if _, err := os.Stat(options.DirPath); os.IsExist(err) {
+	if _, err := os.Stat(options.DirPath); os.IsNotExist(err) {
 		if err := os.MkdirAll(options.DirPath, os.ModePerm); err != nil {
 			return nil, err
 		}
@@ -85,6 +85,43 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 	}
 	// 从内存索引中拿出位置信息
 	pos := db.index.Get(key)
+
+	// 根据位置信息获取log record
+	return db.getValueByPosition(pos)
+
+}
+
+// ListKeys 获取数据库中所有的key
+func (db *DB) ListKeys() [][]byte {
+	iterator := db.index.Iterator(false)
+	keys := make([][]byte, db.index.Size())
+	var idx int
+	for iterator.Rewind(); iterator.Valid(); iterator.Next() {
+		keys[idx] = iterator.Key()
+		idx++
+	}
+	return keys
+}
+
+// Fold 获取所有数据，并全部执行指定的操作
+func (db *DB) Fold(fn func(key []byte, value []byte) bool) error {
+	iterator := db.index.Iterator(false)
+	//defer iterator.Close()
+	for iterator.Rewind(); iterator.Valid(); iterator.Next() {
+		value, err := db.getValueByPosition(iterator.Value())
+		if err != nil {
+			return err
+		}
+		if !fn(iterator.Key(), value) {
+			break
+		}
+	}
+	return nil
+}
+
+// getValueByPosition 通过位置信息获取log record
+func (db *DB) getValueByPosition(pos *data.LogRecordPos) (value []byte, err error) {
+
 	if pos == nil {
 		return nil, ErrKeyNotFound
 	}
@@ -107,7 +144,6 @@ func (db *DB) Get(key []byte) ([]byte, error) {
 		return nil, ErrKeyNotFound
 	}
 	return record.Value, nil
-
 }
 
 func (db *DB) Delete(key []byte) error {
@@ -280,4 +316,32 @@ func (db *DB) loadIndexFromDataFiles() error {
 		}
 	}
 	return nil
+}
+
+func (db *DB) Close() error {
+	if db.activeFile == nil {
+		// TODO, 不应该也关闭older吗
+		return nil
+	}
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	if err := db.activeFile.Close(); err != nil {
+		return err
+	}
+
+	for _, file := range db.olderFiles {
+		if err := file.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (db *DB) Sync() error {
+	if db.activeFile == nil {
+		return nil
+	}
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	return db.activeFile.Sync()
 }

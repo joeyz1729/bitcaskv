@@ -7,9 +7,11 @@ import (
 )
 
 type Indexer interface {
+	Size() int                                   // 返回索引中一共有多少条数据
 	Put(key []byte, pos *data.LogRecordPos) bool // 向索引存储key的磁盘位置信息
 	Get(key []byte) *data.LogRecordPos           // 获取内存索引中存储的磁盘位置信息
 	Delete(key []byte) bool                      // 删除某个key的索引
+	Iterator(reverse bool) Iterator              // 返回迭代器
 }
 
 type IndexerType int8
@@ -43,3 +45,14 @@ func (item *Item) Less(bi btree.Item) bool {
 }
 
 var _ btree.Item = (*Item)(nil)
+
+// Iterator 通用索引迭代器
+type Iterator interface {
+	Rewind()                   // 重新回到第一个元素
+	Seek(key []byte)           // 查找第一个大于（小于）等于key的值
+	Next()                     // 查找下一个值
+	Valid() bool               // 检查迭代是否结束
+	Key() []byte               // 获取key的值
+	Value() *data.LogRecordPos // 获取当前遍历位置的value
+	Close()                    // 关闭迭代器
+}
