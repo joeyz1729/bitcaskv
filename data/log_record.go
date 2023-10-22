@@ -11,6 +11,7 @@ type LogRecordType = byte
 const (
 	LogRecordNormal LogRecordType = iota
 	LogRecordDeleted
+	LogRecordTxnFinished
 )
 
 const (
@@ -36,6 +37,12 @@ type logRecordHeader struct {
 type LogRecordPos struct {
 	Fid    uint32
 	Offset int64
+}
+
+// TransactionRecord batch操作的记录信息
+type TransactionRecord struct {
+	Record *LogRecord
+	Pos    *LogRecordPos
 }
 
 // EncodeLogRecord 将数据记录编码，包括crc，type，key size， value size，用于写入数据文件

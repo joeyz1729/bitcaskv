@@ -12,9 +12,7 @@ import (
 func destroyDB(db *DB) {
 	if db != nil {
 		if db.activeFile != nil {
-			if err := db.Close(); err != nil {
-				panic(err)
-			}
+			_ = db.Close()
 		}
 		err := os.RemoveAll(db.options.DirPath)
 		if err != nil {

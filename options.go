@@ -33,3 +33,15 @@ var DefaultIteratorOptions = IteratorOptions{
 	Prefix:  []byte{},
 	Reverse: false,
 }
+
+// WriteBatchOptions 原子批量写入操作的选项
+type WriteBatchOptions struct {
+	MaxBatchNum uint // 一个批次中最大的操作量
+	SyncWrites  bool // 提交事务的时候是否进行持久化
+
+}
+
+var DefaultWriteBatchOptions = WriteBatchOptions{
+	MaxBatchNum: 10000,
+	SyncWrites:  false,
+}

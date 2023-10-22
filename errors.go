@@ -11,4 +11,6 @@ var (
 	ErrDataFileNotFound = errors.New("data file not found")
 
 	ErrDataDirectoryCorrupted = errors.New("the database directory maybe corrupted")
+
+	ErrExceedmMaxBatchNum = errors.New("exceed the max batch num")
 )
