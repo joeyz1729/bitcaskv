@@ -43,7 +43,6 @@ func (df *DataFile) ReadLogRecord(offset int64) (*LogRecord, int64, error) {
 	if err != nil {
 		return nil, 0, err
 	}
-
 	// 0. 判断max header size 是否超过文件大小
 	var headerBytes int64 = maxLogRecordHeaderSize
 	if offset+maxLogRecordHeaderSize > fileSize {
@@ -56,16 +55,16 @@ func (df *DataFile) ReadLogRecord(offset int64) (*LogRecord, int64, error) {
 		return nil, 0, err
 	}
 
-	// 1.1 解码
+	// 1.1 解码并校验
 	header, headerSize := decodeLogRecordHeader(headerBuf)
 	if header == nil {
 		return nil, 0, io.EOF
 	}
-
-	// 1.1 校验
 	if header.crc == 0 && header.keySize == 0 && header.valueSize == 0 {
 		return nil, 0, io.EOF
 	}
+
+	// 取出大小信息
 	keySize, valueSize := int64(header.keySize), int64(header.valueSize)
 	var recordSize = headerSize + keySize + valueSize
 
@@ -88,6 +87,7 @@ func (df *DataFile) ReadLogRecord(offset int64) (*LogRecord, int64, error) {
 	return nil, recordSize, nil
 }
 
+// Write 将数据写入
 func (df *DataFile) Write(buf []byte) error {
 	n, err := df.IoManager.Write(buf)
 	if err != nil {
@@ -97,21 +97,30 @@ func (df *DataFile) Write(buf []byte) error {
 	return nil
 }
 
+// Sync 将数据刷盘
 func (df *DataFile) Sync() error {
 	return df.IoManager.Sync()
 }
 
+// Close 将数据文件关闭
 func (df *DataFile) Close() error {
 	return df.IoManager.Close()
 }
 
+// readNBytes 从dataFile中读取指定位置长度的数据
 func (df *DataFile) readNBytes(n int64, offset int64) (b []byte, err error) {
 	b = make([]byte, n)
 	_, err = df.IoManager.Read(b, offset)
 	return
 }
 
+// getLogRecordCRC 根据record的key，value，以及header计算CRC校验和
 func getLogRecordCRC(lr *LogRecord, header []byte) uint32 {
-	// TODO
-	return 0
+	if lr == nil {
+		return 0
+	}
+	crc := crc32.ChecksumIEEE(header[:])
+	crc = crc32.Update(crc, crc32.IEEETable, lr.Key)
+	crc = crc32.Update(crc, crc32.IEEETable, lr.Value)
+	return crc
 }

@@ -1,6 +1,9 @@
 package data
 
-import "encoding/binary"
+import (
+	"encoding/binary"
+	"hash/crc32"
+)
 
 // LogRecordType 记录的状态，墓碑值记录是否已经被删除
 type LogRecordType = byte
@@ -35,14 +38,50 @@ type LogRecordPos struct {
 	Offset int64
 }
 
-// EncodeLogRecord 将数据记录编码
+// EncodeLogRecord 将数据记录编码，包括crc，type，key size， value size，用于写入数据文件
 func EncodeLogRecord(logRecord *LogRecord) ([]byte, int64) {
-	//TODO
-	return nil, 0
+	// 初始化header数组
+	header := make([]byte, maxLogRecordHeaderSize)
+
+	// 添加type
+	header[4] = logRecord.Type
+	var index = 5
+
+	// 添加变长的size
+	index += binary.PutVarint(header[index:], int64(len(logRecord.Key)))
+	index += binary.PutVarint(header[index:], int64(len(logRecord.Value)))
+	var totalSize = index + len(logRecord.Key) + len(logRecord.Value)
+
+	// 生成crc校验和并添加
+	encBytes := make([]byte, totalSize)
+	copy(encBytes[:index], header)
+	copy(encBytes[index:], logRecord.Key)
+	copy(encBytes[index+len(logRecord.Key):], logRecord.Value)
+	crc := crc32.ChecksumIEEE(encBytes[4:])
+	binary.LittleEndian.PutUint32(encBytes[:4], crc)
+
+	//fmt.Printf("header length: %d, header crc: %d\n", index, crc)
+
+	return encBytes, int64(totalSize)
 }
 
-// decodeLogRecordHeader 对header进行解码
+// decodeLogRecordHeader 对header进行解码，返回header解码后的结果和header的长度
 func decodeLogRecordHeader(buf []byte) (*logRecordHeader, int64) {
-	//TODO
-	return nil, 0
+	if len(buf) <= 4 {
+		return nil, 0
+	}
+	// 获取crc和type
+	header := &logRecordHeader{
+		crc:        binary.LittleEndian.Uint32(buf[:4]),
+		recordType: buf[4],
+	}
+	// 获取变长的size
+	var index = 5
+	keySize, n := binary.Varint(buf[index:])
+	header.keySize = uint32(keySize)
+	index += n
+	valueSize, n := binary.Varint(buf[index:])
+	header.valueSize = uint32(valueSize)
+	index += n
+	return header, int64(index)
 }
