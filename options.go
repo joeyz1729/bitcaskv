@@ -2,31 +2,44 @@ package bitcaskv
 
 import "os"
 
-// Options 数据库配置信息
 type Options struct {
-	DirPath      string // 数据库文件存放的位置
-	DataFileSize int64  // 数据文件的大小
+	// 数据库数据目录
+	DirPath string
 
-	IndexType IndexType // 使用的内存索引类型
+	// 数据文件的大小
+	DataFileSize int64
 
-	SyncWrites   bool // 是否开启写持久化
-	BytesPerSync uint // 累计写入阈值进行持久化
+	// 每次写数据是否持久化
+	SyncWrites bool
+
+	// 累计写到多少字节后进行持久化
+	BytesPerSync uint
+
+	// 索引类型
+	IndexType IndexerType
+
+	// 启动时是否使用 MMap 加载数据
+	MMapAtStartup bool
+
+	//	数据文件合并的阈值
+	DataFileMergeRatio float32
 }
 
-type IndexType uint8
+type IndexerType uint8
 
 const (
-	TypeBTree IndexType = iota + 1
+	TypeBTree IndexerType = iota + 1
 	TypeART
 	TypeBPlusTree
 )
 
 var DefaultOptions = Options{
-	DirPath:      os.TempDir(),
-	DataFileSize: 256 * 1024 * 1024,
-	IndexType:    TypeBTree,
-	SyncWrites:   false,
-	BytesPerSync: 0,
+	DirPath:       os.TempDir(),
+	DataFileSize:  256 * 1024 * 1024,
+	IndexType:     TypeBTree,
+	SyncWrites:    false,
+	BytesPerSync:  0,
+	MMapAtStartup: true,
 }
 
 type IteratorOptions struct {

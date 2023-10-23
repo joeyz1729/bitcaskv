@@ -1,6 +1,7 @@
 package bitcaskv
 
 import (
+	"bitcaskv/fio"
 	"errors"
 	"fmt"
 	"io"
@@ -110,6 +111,12 @@ func Open(options Options) (*DB, error) {
 		// 加载内存索引
 		if err := db.loadIndexFromDataFiles(); err != nil {
 			return nil, err
+		}
+
+		if db.options.MMapAtStartup {
+			if err := db.resetIOType(); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if db.options.IndexType == TypeBPlusTree {
@@ -308,7 +315,7 @@ func (db *DB) setActiveDataFile() error {
 	if db.activeFile != nil {
 		initialFileId = db.activeFile.FileId + 1
 	}
-	dataFile, err := data.OpenDataFile(db.options.DirPath, initialFileId)
+	dataFile, err := data.OpenDataFile(db.options.DirPath, initialFileId, fio.StandardFIO)
 	if err != nil {
 		return err
 	}
@@ -350,7 +357,11 @@ func (db *DB) loadDataFiles() error {
 	db._fileIds = fileIds
 	// 遍历并打开数据文件
 	for i, fid := range fileIds {
-		dataFile, err := data.OpenDataFile(db.options.DirPath, uint32(fid))
+		ioType := fio.StandardFIO
+		if db.options.MMapAtStartup {
+			ioType = fio.MemoryMap
+		}
+		dataFile, err := data.OpenDataFile(db.options.DirPath, uint32(fid), ioType)
 		if err != nil {
 			return err
 		}
@@ -541,4 +552,21 @@ func (db *DB) loadSeqNo() error {
 	db.seqNoFileExists = true
 
 	return nil
+}
+
+// resetIOType 将IO类型设置为标准 File IO
+func (db *DB) resetIOType() error {
+	if db.activeFile == nil {
+		return nil
+	}
+	if err := db.activeFile.SetIOManager(db.options.DirPath, fio.StandardFIO); err != nil {
+		return err
+	}
+	for _, dataFile := range db.olderFiles {
+		if err := dataFile.SetIOManager(db.options.DirPath, fio.StandardFIO); err != nil {
+			return err
+		}
+	}
+	return nil
+
 }

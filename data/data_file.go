@@ -28,9 +28,9 @@ type DataFile struct {
 }
 
 // OpenDataFile 打开数据文件
-func OpenDataFile(dirPath string, fileId uint32) (*DataFile, error) {
+func OpenDataFile(dirPath string, fileId uint32, ioType fio.FileIOType) (*DataFile, error) {
 	fileName := GetDataFileName(dirPath, fileId)
-	return newDataFile(fileName, fileId)
+	return newDataFile(fileName, fileId, ioType)
 }
 
 func GetDataFileName(dirPath string, fileId uint32) string {
@@ -40,21 +40,21 @@ func GetDataFileName(dirPath string, fileId uint32) string {
 
 func OpenMergeFinishedFile(dirPath string) (*DataFile, error) {
 	fileName := filepath.Join(dirPath, MergeFinishedFileName)
-	return newDataFile(fileName, uint32(0))
+	return newDataFile(fileName, uint32(0), fio.StandardFIO)
 }
 
 func OpenHintFile(dirPath string) (*DataFile, error) {
 	fileName := filepath.Join(dirPath, HintFileName)
-	return newDataFile(fileName, uint32(0))
+	return newDataFile(fileName, uint32(0), fio.StandardFIO)
 }
 
 func OpenSeqNoFile(dirPath string) (*DataFile, error) {
 	fileName := filepath.Join(dirPath, SeqNoFileName)
-	return newDataFile(fileName, uint32(0))
+	return newDataFile(fileName, uint32(0), fio.StandardFIO)
 }
 
-func newDataFile(fileName string, fileId uint32) (*DataFile, error) {
-	ioManager, err := fio.NewFileIOManager(fileName)
+func newDataFile(fileName string, fileId uint32, ioType fio.FileIOType) (*DataFile, error) {
+	ioManager, err := fio.NewIOManager(fileName, ioType)
 	if err != nil {
 		return nil, err
 	}
@@ -161,4 +161,16 @@ func getLogRecordCRC(lr *LogRecord, header []byte) uint32 {
 	crc = crc32.Update(crc, crc32.IEEETable, lr.Key)
 	crc = crc32.Update(crc, crc32.IEEETable, lr.Value)
 	return crc
+}
+
+func (df *DataFile) SetIOManager(dirPath string, ioType fio.FileIOType) error {
+	if err := df.IoManager.Close(); err != nil {
+		return err
+	}
+	ioManager, err := fio.NewIOManager(GetDataFileName(dirPath, df.FileId), ioType)
+	if err != nil {
+		return err
+	}
+	df.IoManager = ioManager
+	return nil
 }

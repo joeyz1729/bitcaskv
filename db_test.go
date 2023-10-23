@@ -6,6 +6,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"os"
 	"testing"
+	"time"
 )
 
 // 测试完成之后销毁 DB 数据目录
@@ -136,4 +137,38 @@ func TestDB_FileLock(t *testing.T) {
 	assert.Nil(t, err)
 	_, err = Open(opts)
 	assert.Nil(t, err)
+}
+
+func TestDB_Open2(t *testing.T) {
+	opts := DefaultOptions
+	opts.MMapAtStartup = true
+	opts.DirPath = "/tmp/bitcask-go"
+	// 使用mmap打开
+	now := time.Now()
+	db, err := Open(opts)
+	t.Log("open time with mmap", time.Since(now))
+	assert.NotNil(t, db)
+	assert.Nil(t, err)
+
+	// 关闭重新打开
+	err = db.Close()
+	assert.Nil(t, err)
+
+	// 使用标准打开
+	now = time.Now()
+	opts.MMapAtStartup = false
+	db2, err := Open(opts)
+	t.Log("open time with standard io", time.Since(now))
+	assert.NotNil(t, db2)
+	assert.Nil(t, err)
+
+	//now = time.Now()
+	//for i := 0; i < 1000000; i++ {
+	//	key := fmt.Sprintf("test-mmap-%d", i)
+	//	value := key
+	//	err := db.Put([]byte(key), []byte(value))
+	//	assert.Nil(t, err)
+	//}
+	//t.Log("put data", time.Since(now))
+
 }
