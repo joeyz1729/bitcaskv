@@ -80,7 +80,7 @@ func (wb *WriteBatch) Commit() error {
 	}
 
 	if uint(len(wb.pendingWrites)) > wb.options.MaxBatchNum {
-		return ErrExceedmMaxBatchNum
+		return ErrExceedMaxBatchNum
 	}
 
 	wb.db.mu.Lock()

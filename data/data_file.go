@@ -13,7 +13,12 @@ var (
 	ErrInvalidCRC = errors.New("invalid crc value, log record maybe corrupted")
 )
 
-const DataFileNameSuffix = ".data"
+const (
+	DataFileNameSuffix    = ".data"
+	HintFileName          = "hint-index"
+	MergeFinishedFileName = "merge-finished"
+	SeqNoFileName         = "seq-no"
+)
 
 // DataFile 数据文件
 type DataFile struct {
@@ -24,7 +29,26 @@ type DataFile struct {
 
 // OpenDataFile 打开数据文件
 func OpenDataFile(dirPath string, fileId uint32) (*DataFile, error) {
+	fileName := GetDataFileName(dirPath, fileId)
+	return newDataFile(fileName, fileId)
+}
+
+func GetDataFileName(dirPath string, fileId uint32) string {
 	fileName := filepath.Join(dirPath, fmt.Sprintf("%09d", fileId)+DataFileNameSuffix)
+	return fileName
+}
+
+func OpenMergeFinishedFile(dirPath string) (*DataFile, error) {
+	fileName := filepath.Join(dirPath, MergeFinishedFileName)
+	return newDataFile(fileName, uint32(0))
+}
+
+func OpenHintFile(dirPath string) (*DataFile, error) {
+	fileName := filepath.Join(dirPath, HintFileName)
+	return newDataFile(fileName, uint32(0))
+}
+
+func newDataFile(fileName string, fileId uint32) (*DataFile, error) {
 	ioManager, err := fio.NewFileIOManager(fileName)
 	if err != nil {
 		return nil, err
@@ -34,7 +58,6 @@ func OpenDataFile(dirPath string, fileId uint32) (*DataFile, error) {
 		WriteOff:  0,
 		IoManager: ioManager,
 	}, nil
-
 }
 
 // ReadLogRecord 根据offset从datafile中读取一条记录, 返回记录和读到的长度
@@ -95,6 +118,16 @@ func (df *DataFile) Write(buf []byte) error {
 	}
 	df.WriteOff += int64(n)
 	return nil
+}
+
+// WriteHintRecord 写入 Hint 文件
+func (df *DataFile) WriteHintRecord(key []byte, pos *LogRecordPos) error {
+	record := &LogRecord{
+		Key:   key,
+		Value: EncodeLogRecordPos(pos),
+	}
+	encRecord, _ := EncodeLogRecord(record)
+	return df.Write(encRecord)
 }
 
 // Sync 将数据刷盘
