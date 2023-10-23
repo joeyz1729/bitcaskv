@@ -12,6 +12,7 @@ type Indexer interface {
 	Get(key []byte) *data.LogRecordPos           // 获取内存索引中存储的磁盘位置信息
 	Delete(key []byte) bool                      // 删除某个key的索引
 	Iterator(reverse bool) Iterator              // 返回迭代器
+	Close() error
 }
 
 type IndexerType int8
@@ -19,16 +20,18 @@ type IndexerType int8
 const (
 	TypeBTree IndexerType = iota + 1
 	TypeART
+	TypeBPlusTree
 )
 
 // NewIndexer 根据类型初始化索引
-func NewIndexer(typ IndexerType) Indexer {
+func NewIndexer(typ IndexerType, dirPath string, syncWrites bool) Indexer {
 	switch typ {
 	case TypeBTree:
 		return NewBTree()
 	case TypeART:
-		//TODO
-		return nil
+		return NewART()
+	case TypeBPlusTree:
+		return NewBPlusTree(dirPath, syncWrites)
 	default:
 		panic("unsupported indexer type")
 	}

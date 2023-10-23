@@ -15,6 +15,7 @@ type IndexType uint8
 const (
 	TypeBTree IndexType = iota + 1
 	TypeART
+	TypeBPlusTree
 )
 
 var DefaultOptions = Options{

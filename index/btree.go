@@ -62,6 +62,10 @@ func (bt *BTree) Size() int {
 	return bt.tree.Len()
 }
 
+func (bt *BTree) Close() error {
+	return nil
+}
+
 var _ Indexer = (*BTree)(nil)
 
 // BTree 索引迭代器

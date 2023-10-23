@@ -48,6 +48,11 @@ func OpenHintFile(dirPath string) (*DataFile, error) {
 	return newDataFile(fileName, uint32(0))
 }
 
+func OpenSeqNoFile(dirPath string) (*DataFile, error) {
+	fileName := filepath.Join(dirPath, SeqNoFileName)
+	return newDataFile(fileName, uint32(0))
+}
+
 func newDataFile(fileName string, fileId uint32) (*DataFile, error) {
 	ioManager, err := fio.NewFileIOManager(fileName)
 	if err != nil {

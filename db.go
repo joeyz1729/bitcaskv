@@ -13,6 +13,10 @@ import (
 	"sync"
 )
 
+const (
+	seqNoKey = "seq.no"
+)
+
 // DB 存储引擎实例
 type DB struct {
 	options Options
@@ -42,17 +46,29 @@ func Open(options Options) (*DB, error) {
 		return nil, err
 	}
 	// 如果数据库目录不存在则创建
+	var isInitial bool
 	if _, err := os.Stat(options.DirPath); os.IsNotExist(err) {
+
 		if err := os.MkdirAll(options.DirPath, os.ModePerm); err != nil {
 			return nil, err
 		}
+		isInitial = true
 	}
+	entries, err := os.ReadDir(options.DirPath)
+	if err != nil {
+		return nil, err
+	}
+	if len(entries) == 0 {
+		isInitial = true
+	}
+
 	// 初始化 DB 实例结构体
 	db := &DB{
 		options:    options,
 		mu:         new(sync.RWMutex),
 		olderFiles: make(map[uint32]*data.DataFile),
-		index:      index.NewIndexer(index.IndexerType(options.IndexType)),
+		index:      index.NewIndexer(index.IndexerType(options.IndexType), options.DirPath, options.SyncWrites),
+		isInitial:  isInitial,
 	}
 
 	// 加载 merge 目录
@@ -65,15 +81,31 @@ func Open(options Options) (*DB, error) {
 		return nil, err
 	}
 
-	// 从 hint 中查看是否有索引文件
-	if err := db.loadIndexFromHintFile(); err != nil {
-		return nil, err
+	if db.options.IndexType != TypeBPlusTree {
+		// 从 hint 中查看是否有索引文件
+		if err := db.loadIndexFromHintFile(); err != nil {
+			return nil, err
+		}
+		// 加载内存索引
+		if err := db.loadIndexFromDataFiles(); err != nil {
+			return nil, err
+		}
+	}
+	if db.options.IndexType == TypeBPlusTree {
+		if err := db.loadSeqNo(); err != nil {
+			return nil, err
+		}
+
+		if db.activeFile != nil {
+			size, err := db.activeFile.IoManager.Size()
+			if err != nil {
+				return nil, err
+			}
+			db.activeFile.WriteOff += size
+		}
+
 	}
 
-	// 加载内存索引
-	if err := db.loadIndexFromDataFiles(); err != nil {
-		return nil, err
-	}
 	// 返回数据库实例
 	return db, nil
 }
@@ -130,6 +162,7 @@ func (db *DB) ListKeys() [][]byte {
 func (db *DB) Fold(fn func(key []byte, value []byte) bool) error {
 	iterator := db.index.Iterator(false)
 	//defer iterator.Close()
+	defer iterator.Close()
 	for iterator.Rewind(); iterator.Valid(); iterator.Next() {
 		value, err := db.getValueByPosition(iterator.Value())
 		if err != nil {
@@ -409,6 +442,29 @@ func (db *DB) Close() error {
 	}
 	db.mu.Lock()
 	defer db.mu.Unlock()
+
+	// 关闭索引文件，针对BPlusTree
+	if err := db.index.Close(); err != nil {
+		return err
+	}
+
+	// 保存事务序列号
+	seqNoFile, err := data.OpenSeqNoFile(db.options.DirPath)
+	if err != nil {
+		return err
+	}
+	record := &data.LogRecord{
+		Key:   []byte(seqNoKey),
+		Value: []byte(strconv.FormatUint(db.seqNo, 10)),
+	}
+	encRecord, _ := data.EncodeLogRecord(record)
+	if err := seqNoFile.Write(encRecord); err != nil {
+		return err
+	}
+	if err := seqNoFile.Sync(); err != nil {
+		return err
+	}
+
 	if err := db.activeFile.Close(); err != nil {
 		return err
 	}
@@ -428,4 +484,26 @@ func (db *DB) Sync() error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	return db.activeFile.Sync()
+}
+
+func (db *DB) loadSeqNo() error {
+	fileName := filepath.Join(db.options.DirPath, data.SeqNoFileName)
+	if _, err := os.Stat(fileName); err != nil {
+		return err
+	}
+
+	seqNoFile, err := data.OpenSeqNoFile(db.options.DirPath)
+	if err != nil {
+		return err
+	}
+	record, _, _ := seqNoFile.ReadLogRecord(0)
+	seqNo, err := strconv.ParseUint(string(record.Key), 10, 64)
+	if err != nil {
+		return err
+	}
+
+	db.seqNo = seqNo
+	db.seqNoFileExists = true
+
+	return nil
 }

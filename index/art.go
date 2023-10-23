@@ -57,6 +57,10 @@ func (art *AdaptiveRadixTree) Iterator(reverse bool) Iterator {
 	return newArtIterator(art.tree, reverse)
 }
 
+func (art *AdaptiveRadixTree) Close() error {
+	return nil
+}
+
 var _ Indexer = (*AdaptiveRadixTree)(nil)
 
 // ArtIterator 索引迭代器
