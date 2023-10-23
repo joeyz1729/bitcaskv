@@ -30,7 +30,7 @@ func main() {
 	r.GET("/bitcask/keys", listKeysHandler)
 	r.GET("/bitcask/stat", statHandler)
 
-	r.Run()
+	panic(r.Run(":8080"))
 }
 
 type GetForm struct {

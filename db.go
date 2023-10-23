@@ -614,3 +614,9 @@ func (db *DB) resetIOType() error {
 	return nil
 
 }
+
+func (db *DB) Backup(dest string) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	return utils.CopyDir(db.options.DirPath, dest, []string{fileLockName})
+}
