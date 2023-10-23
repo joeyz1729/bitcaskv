@@ -4,10 +4,13 @@ import "os"
 
 // Options 数据库配置信息
 type Options struct {
-	DirPath      string    // 数据库文件存放的位置
-	DataFileSize int64     // 数据文件的大小
-	IndexType    IndexType // 使用的内存索引类型
-	SyncWrites   bool      // 是否开启写持久化
+	DirPath      string // 数据库文件存放的位置
+	DataFileSize int64  // 数据文件的大小
+
+	IndexType IndexType // 使用的内存索引类型
+
+	SyncWrites   bool // 是否开启写持久化
+	BytesPerSync uint // 累计写入阈值进行持久化
 }
 
 type IndexType uint8
@@ -23,6 +26,7 @@ var DefaultOptions = Options{
 	DataFileSize: 256 * 1024 * 1024,
 	IndexType:    TypeBTree,
 	SyncWrites:   false,
+	BytesPerSync: 0,
 }
 
 type IteratorOptions struct {

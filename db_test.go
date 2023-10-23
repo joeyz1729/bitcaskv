@@ -116,3 +116,24 @@ func TestDB_Sync(t *testing.T) {
 	err = db.Sync()
 	assert.Nil(t, err)
 }
+
+func TestDB_FileLock(t *testing.T) {
+	opts := DefaultOptions
+	dir, _ := os.MkdirTemp("", "bitcask-go-filelock")
+	opts.DirPath = dir
+	db, err := Open(opts)
+	defer destroyDB(db)
+	assert.Nil(t, err)
+	assert.NotNil(t, db)
+
+	// 重复打开目录
+	_, err = Open(opts)
+	assert.NotNil(t, err)
+	//t.Log(err)
+
+	// 关闭后打开
+	err = db.Close()
+	assert.Nil(t, err)
+	_, err = Open(opts)
+	assert.Nil(t, err)
+}

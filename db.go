@@ -1,9 +1,8 @@
 package bitcaskv
 
 import (
-	"bitcaskv/data"
-	"bitcaskv/index"
 	"errors"
+	"fmt"
 	"io"
 	"os"
 	"path/filepath"
@@ -11,10 +10,16 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+
+	"bitcaskv/data"
+	"bitcaskv/index"
+
+	"github.com/gofrs/flock"
 )
 
 const (
-	seqNoKey = "seq.no"
+	seqNoKey     = "seq.no"
+	fileLockName = "flock"
 )
 
 // DB 存储引擎实例
@@ -30,10 +35,13 @@ type DB struct {
 
 	_fileIds []int // 文件id，仅用于open时加载索引
 
-	isMerging       bool // 是否正在 merge
+	isMerging bool // 是否正在 merge
+
 	seqNoFileExists bool // 存储事务序列号的文件是否存在
 	isInitial       bool // 是否是第一次初始化此数据目录
-	//fileLock        *flock.Flock              // 文件锁保证多进程之间的互斥
+
+	fileLock *flock.Flock // 文件锁保证多进程之间的互斥
+
 	bytesWrite  uint  // 累计写了多少个字节
 	reclaimSize int64 // 表示有多少数据是无效的
 }
@@ -54,6 +62,18 @@ func Open(options Options) (*DB, error) {
 		}
 		isInitial = true
 	}
+
+	// 判断数据库目录是否正在使用
+	fileLock := flock.New(filepath.Join(options.DirPath, fileLockName))
+	hold, err := fileLock.TryLock()
+	if err != nil {
+		return nil, err
+	}
+	// 有其他进程正在使用
+	if !hold {
+		return nil, ErrDatabaseIsUsing
+	}
+
 	entries, err := os.ReadDir(options.DirPath)
 	if err != nil {
 		return nil, err
@@ -69,6 +89,7 @@ func Open(options Options) (*DB, error) {
 		olderFiles: make(map[uint32]*data.DataFile),
 		index:      index.NewIndexer(index.IndexerType(options.IndexType), options.DirPath, options.SyncWrites),
 		isInitial:  isInitial,
+		fileLock:   fileLock,
 	}
 
 	// 加载 merge 目录
@@ -259,11 +280,20 @@ func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, er
 	if err := db.activeFile.Write(encRes); err != nil {
 		return nil, err
 	}
+	db.bytesWrite += uint(size)
 
 	// 如果开启安全持久化
-	if db.options.SyncWrites {
+	var needSync = db.options.SyncWrites
+	if !needSync && db.options.BytesPerSync > 0 && db.bytesWrite >= db.options.BytesPerSync {
+		needSync = true
+	}
+	if needSync {
 		if err := db.activeFile.Sync(); err != nil {
 			return nil, err
+		}
+		// 清空累计值
+		if db.bytesWrite > 0 {
+			db.bytesWrite = 0
 		}
 	}
 
@@ -436,6 +466,11 @@ func (db *DB) loadIndexFromDataFiles() error {
 }
 
 func (db *DB) Close() error {
+	defer func() {
+		if err := db.fileLock.Unlock(); err != nil {
+			panic(fmt.Sprintf("failed to unlock the directory, %v", err))
+		}
+	}()
 	if db.activeFile == nil {
 		// TODO, 不应该也关闭older吗
 		return nil
