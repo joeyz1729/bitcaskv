@@ -48,6 +48,14 @@ type DB struct {
 	reclaimSize int64 // 表示有多少数据是无效的
 }
 
+// Stat 存储引擎统计信息
+type Stat struct {
+	KeyNum          uint  // key 的总数量
+	DataFileNum     uint  // 数据文件的数量
+	ReclaimableSize int64 // 可以进行 merge 回收的数据量，字节为单位
+	DiskSize        int64 // 数据目录所占磁盘空间大小
+}
+
 // Open 打开数据库实例
 func Open(options Options) (*DB, error) {
 	// 配置项校验
@@ -58,11 +66,10 @@ func Open(options Options) (*DB, error) {
 	// 如果数据库目录不存在则创建
 	var isInitial bool
 	if _, err := os.Stat(options.DirPath); os.IsNotExist(err) {
-
+		isInitial = true
 		if err := os.MkdirAll(options.DirPath, os.ModePerm); err != nil {
 			return nil, err
 		}
-		isInitial = true
 	}
 
 	// 判断数据库目录是否正在使用
@@ -137,14 +144,6 @@ func Open(options Options) (*DB, error) {
 
 	// 返回数据库实例
 	return db, nil
-}
-
-// Stat 存储引擎统计信息
-type Stat struct {
-	KeyNum          uint  // key 的总数量
-	DataFileNum     uint  // 数据文件的数量
-	ReclaimableSize int64 // 可以进行 merge 回收的数据量，字节为单位
-	DiskSize        int64 // 数据目录所占磁盘空间大小
 }
 
 // Put 将kv键值对写入到数据库中
@@ -394,15 +393,16 @@ func (db *DB) loadDataFiles() error {
 }
 
 func (db *DB) loadIndexFromDataFiles() error {
-	// TODO
 	if len(db._fileIds) == 0 {
 		// 空数据库，返回
 		return nil
 	}
 
+	// 判断是否发生过 merge
 	hasMerge, nonMergeFileId := false, uint32(0)
 	mergeFinFileName := filepath.Join(db.options.DirPath, data.MergeFinishedFileName)
-	if _, err := os.Stat(mergeFinFileName); err != nil {
+	if _, err := os.Stat(mergeFinFileName); err == nil {
+		// 如果有 merge finished file，则更新
 		fid, err := db.getNonMergeFileId(db.options.DirPath)
 		if err != nil {
 			return err
@@ -415,7 +415,7 @@ func (db *DB) loadIndexFromDataFiles() error {
 		// 更新清理空间大小
 		var oldPos *data.LogRecordPos
 		if typ == data.LogRecordDeleted {
-			// 删除记录本身可以被清理
+			// delete record 本身可以被清理
 			oldPos, _ = db.index.Delete(key)
 			db.reclaimSize += int64(oldPos.Size)
 		} else {
