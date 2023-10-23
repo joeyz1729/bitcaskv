@@ -11,17 +11,18 @@ const nonTransactionSeqNo uint64 = 0
 
 var txnFinKey = []byte("txn-fin")
 
-// WriteBatch 原子批量写入数据
+// WriteBatch 原子批量写数据，保证原子性
 type WriteBatch struct {
 	options       WriteBatchOptions
 	mu            *sync.Mutex
 	db            *DB
-	pendingWrites map[string]*data.LogRecord // 暂存数据
+	pendingWrites map[string]*data.LogRecord // 暂存用户写入的数据
 }
 
+// NewWriteBatch 初始化 WriteBatch
 func (db *DB) NewWriteBatch(opts WriteBatchOptions) *WriteBatch {
 	if db.options.IndexType == TypeBPlusTree && !db.seqNoFileExists && !db.isInitial {
-		panic("cannot use write batch, seq no file not exist")
+		panic("cannot use write batch, seq no file not exists")
 	}
 	return &WriteBatch{
 		options:       opts,
@@ -39,6 +40,7 @@ func (wb *WriteBatch) Put(key []byte, value []byte) error {
 	wb.mu.Lock()
 	defer wb.mu.Unlock()
 
+	// 暂存 LogRecord
 	logRecord := &data.LogRecord{
 		Key:   key,
 		Value: value,
@@ -47,7 +49,7 @@ func (wb *WriteBatch) Put(key []byte, value []byte) error {
 	return nil
 }
 
-// Delete 批量删除数据
+// Delete 删除数据
 func (wb *WriteBatch) Delete(key []byte) error {
 	if len(key) == 0 {
 		return ErrKeyIsEmpty
@@ -55,16 +57,17 @@ func (wb *WriteBatch) Delete(key []byte) error {
 	wb.mu.Lock()
 	defer wb.mu.Unlock()
 
-	// 判断删除的数据是否存在，或者是否过期删除
+	// 数据不存在则直接返回
 	logRecordPos := wb.db.index.Get(key)
 	if logRecordPos == nil {
 		if wb.pendingWrites[string(key)] != nil {
-			// 如果有批量的数据存入，删除
+			// batch中重复的数据存入，删除旧值
 			delete(wb.pendingWrites, string(key))
 		}
 		return nil
 	}
 
+	// 暂存 LogRecord
 	logRecord := &data.LogRecord{
 		Key:  key,
 		Type: data.LogRecordDeleted,
@@ -73,7 +76,7 @@ func (wb *WriteBatch) Delete(key []byte) error {
 	return nil
 }
 
-// Commit 提交事务，暂存的数据全部持久化到磁盘，更新内存索引
+// Commit 提交事务，将暂存的数据写到数据文件，并更新内存索引
 func (wb *WriteBatch) Commit() error {
 	wb.mu.Lock()
 	defer wb.mu.Unlock()
@@ -81,17 +84,18 @@ func (wb *WriteBatch) Commit() error {
 	if len(wb.pendingWrites) == 0 {
 		return nil
 	}
-
 	if uint(len(wb.pendingWrites)) > wb.options.MaxBatchNum {
 		return ErrExceedMaxBatchNum
 	}
 
+	// 加锁保证事务提交串行化
 	wb.db.mu.Lock()
 	defer wb.db.mu.Unlock()
 
-	// 获取事务的序列号
+	// 获取当前最新的事务序列号
 	seqNo := atomic.AddUint64(&wb.db.seqNo, 1)
-	// 开始将暂存数据写入
+
+	// 开始写数据到数据文件当中
 	positions := make(map[string]*data.LogRecordPos)
 	for _, record := range wb.pendingWrites {
 		logRecordPos, err := wb.db.appendLogRecord(&data.LogRecord{
@@ -104,17 +108,17 @@ func (wb *WriteBatch) Commit() error {
 		}
 		positions[string(record.Key)] = logRecordPos
 	}
-	// 写一条表示事务完成的数据
+
+	// 写一条标识事务完成的数据
 	finishedRecord := &data.LogRecord{
 		Key:  logRecordKeyWithSeq(txnFinKey, seqNo),
 		Type: data.LogRecordTxnFinished,
 	}
-	_, err := wb.db.appendLogRecord(finishedRecord)
-	if err != nil {
+	if _, err := wb.db.appendLogRecord(finishedRecord); err != nil {
 		return err
 	}
 
-	// 写入事务完成标识之后，根据配置进行持久化
+	// 根据配置决定是否持久化
 	if wb.options.SyncWrites && wb.db.activeFile != nil {
 		if err := wb.db.activeFile.Sync(); err != nil {
 			return err
@@ -124,31 +128,39 @@ func (wb *WriteBatch) Commit() error {
 	// 更新内存索引
 	for _, record := range wb.pendingWrites {
 		pos := positions[string(record.Key)]
+		var oldPos *data.LogRecordPos
 		if record.Type == data.LogRecordNormal {
-			wb.db.index.Put(record.Key, pos)
+			oldPos = wb.db.index.Put(record.Key, pos)
 		}
 		if record.Type == data.LogRecordDeleted {
-			wb.db.index.Delete(record.Key)
+			oldPos, _ = wb.db.index.Delete(record.Key)
+		}
+		if oldPos != nil {
+			wb.db.reclaimSize += int64(oldPos.Size)
 		}
 	}
 
 	// 清空暂存数据
 	wb.pendingWrites = make(map[string]*data.LogRecord)
+
 	return nil
 }
 
+// key+Seq Number 编码
 func logRecordKeyWithSeq(key []byte, seqNo uint64) []byte {
 	seq := make([]byte, binary.MaxVarintLen64)
 	n := binary.PutUvarint(seq[:], seqNo)
+
 	encKey := make([]byte, n+len(key))
 	copy(encKey[:n], seq[:n])
 	copy(encKey[n:], key)
+
 	return encKey
 }
 
-// parseLogRecordKey 解析实际key和事务序列号
+// 解析 LogRecord 的 key，获取实际的 key 和事务序列号
 func parseLogRecordKey(key []byte) ([]byte, uint64) {
-	uvarint, n := binary.Uvarint(key)
+	seqNo, n := binary.Uvarint(key)
 	realKey := key[n:]
-	return realKey, uvarint
+	return realKey, seqNo
 }

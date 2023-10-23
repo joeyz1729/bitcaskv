@@ -34,12 +34,13 @@ const (
 )
 
 var DefaultOptions = Options{
-	DirPath:       os.TempDir(),
-	DataFileSize:  256 * 1024 * 1024,
-	IndexType:     TypeBTree,
-	SyncWrites:    false,
-	BytesPerSync:  0,
-	MMapAtStartup: true,
+	DirPath:            os.TempDir(),
+	DataFileSize:       256 * 1024 * 1024,
+	IndexType:          TypeBTree,
+	SyncWrites:         false,
+	BytesPerSync:       0,
+	MMapAtStartup:      true,
+	DataFileMergeRatio: 0.5,
 }
 
 type IteratorOptions struct {

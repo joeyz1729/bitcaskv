@@ -2,6 +2,7 @@ package bitcaskv
 
 import (
 	"bitcaskv/fio"
+	"bitcaskv/utils"
 	"errors"
 	"fmt"
 	"io"
@@ -138,6 +139,14 @@ func Open(options Options) (*DB, error) {
 	return db, nil
 }
 
+// Stat 存储引擎统计信息
+type Stat struct {
+	KeyNum          uint  // key 的总数量
+	DataFileNum     uint  // 数据文件的数量
+	ReclaimableSize int64 // 可以进行 merge 回收的数据量，字节为单位
+	DiskSize        int64 // 数据目录所占磁盘空间大小
+}
+
 // Put 将kv键值对写入到数据库中
 func (db *DB) Put(key []byte, value []byte) error {
 	if len(key) == 0 {
@@ -155,8 +164,8 @@ func (db *DB) Put(key []byte, value []byte) error {
 		return err
 	}
 	// 添加位置信息的内存索引
-	if ok := db.index.Put(key, pos); !ok {
-		return ErrIndexUpdateFailed
+	if oldPos := db.index.Put(key, pos); oldPos != nil {
+		db.reclaimSize += int64(oldPos.Size)
 	}
 	return nil
 }
@@ -243,14 +252,20 @@ func (db *DB) Delete(key []byte) error {
 		Key:  logRecordKeyWithSeq(key, nonTransactionSeqNo),
 		Type: data.LogRecordDeleted,
 	}
-	_, err := db.appendLogRecordWithLock(logRecord)
+	pos, err := db.appendLogRecordWithLock(logRecord)
 	if err != nil {
 		return err
 	}
-	ok := db.index.Delete(key)
+	db.reclaimSize += int64(pos.Size)
+
+	oldPos, ok := db.index.Delete(key)
 	if !ok {
 		return ErrIndexUpdateFailed
 	}
+	if oldPos != nil {
+		db.reclaimSize += int64(oldPos.Size)
+	}
+
 	return nil
 }
 
@@ -304,7 +319,7 @@ func (db *DB) appendLogRecord(logRecord *data.LogRecord) (*data.LogRecordPos, er
 		}
 	}
 
-	pos := &data.LogRecordPos{Fid: db.activeFile.FileId, Offset: writeOff}
+	pos := &data.LogRecordPos{Fid: db.activeFile.FileId, Offset: writeOff, Size: uint32(size)}
 	return pos, nil
 
 }
@@ -329,6 +344,9 @@ func checkOptions(options Options) error {
 	}
 	if options.DataFileSize <= 0 {
 		return errors.New("database data file size must be greater than 0")
+	}
+	if options.DataFileMergeRatio > 1 || options.DataFileMergeRatio < 0 {
+		return errors.New("invalid merge ratio, must between 0 and 1")
 	}
 	return nil
 }
@@ -394,17 +412,20 @@ func (db *DB) loadIndexFromDataFiles() error {
 	}
 
 	updateIndex := func(key []byte, typ data.LogRecordType, pos *data.LogRecordPos) {
-		var ok bool
+		// 更新清理空间大小
+		var oldPos *data.LogRecordPos
 		if typ == data.LogRecordDeleted {
-			ok = db.index.Delete(key)
+			// 删除记录本身可以被清理
+			oldPos, _ = db.index.Delete(key)
+			db.reclaimSize += int64(oldPos.Size)
 		} else {
-			ok = db.index.Put(key, pos)
+			oldPos = db.index.Put(key, pos)
 		}
-		// 更新offset
-		if !ok {
-			//return ErrIndexUpdateFailed
-			panic("failed to update index at startup")
+		// 原数据如果存在则清理
+		if oldPos != nil {
+			db.reclaimSize += int64(oldPos.Size)
 		}
+
 	}
 
 	// 暂存事务数据，每个事务id对应一个记录列表
@@ -436,7 +457,7 @@ func (db *DB) loadIndexFromDataFiles() error {
 				return err
 			}
 			// 拿到数据记录后，保存到内存索引当中
-			logRecordPos := &data.LogRecordPos{Fid: fileId, Offset: offset}
+			logRecordPos := &data.LogRecordPos{Fid: fileId, Offset: offset, Size: uint32(size)}
 			realKey, seqNo := parseLogRecordKey(logRecord.Key)
 			if seqNo == nonTransactionSeqNo {
 				// 普通操作，非batch提交
@@ -530,6 +551,29 @@ func (db *DB) Sync() error {
 	db.mu.Lock()
 	defer db.mu.Unlock()
 	return db.activeFile.Sync()
+}
+
+func (db *DB) Stat() *Stat {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	var dataFiles = uint(len(db.olderFiles))
+	if db.activeFile != nil {
+		dataFiles += 1
+	}
+
+	dirSize, err := utils.DirSize(db.options.DirPath)
+	if err != nil {
+		panic(fmt.Sprintf("failed to get dir size: %v", err))
+	}
+
+	return &Stat{
+		KeyNum:          uint(db.index.Size()),
+		DataFileNum:     dataFiles,
+		ReclaimableSize: db.reclaimSize,
+		DiskSize:        dirSize,
+	}
+
 }
 
 func (db *DB) loadSeqNo() error {

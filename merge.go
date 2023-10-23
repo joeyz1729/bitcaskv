@@ -2,6 +2,7 @@ package bitcaskv
 
 import (
 	"bitcaskv/data"
+	"bitcaskv/utils"
 	"io"
 	"os"
 	"path"
@@ -26,6 +27,25 @@ func (db *DB) Merge() error {
 		db.mu.Unlock()
 		return ErrMergeIsProgress
 	}
+	// 查看是否到达 merge 阈值
+	totalSize, err := utils.DirSize(db.options.DirPath)
+	if err != nil {
+		return err
+	}
+	if float32(db.reclaimSize)/float32(totalSize) < db.options.DataFileMergeRatio {
+		db.mu.Unlock()
+		return ErrMergeRatioUnreached
+	}
+	// 查看merge操作空间是否足够
+	availableDiskSize, err := utils.AvailableDiskSize()
+	if err != nil {
+		db.mu.Unlock()
+		return err
+	}
+	if uint64(totalSize-db.reclaimSize) >= availableDiskSize {
+		return ErrNoEnoughSpaceForMerge
+	}
+
 	db.isMerging = true
 	defer func() {
 		db.isMerging = false
@@ -174,7 +194,7 @@ func (db *DB) loadMergeFiles() error {
 		if entry.Name() == data.MergeFinishedFileName {
 			mergeFinished = true
 		}
-		if entry.Name() == data.SeqNoFileName {
+		if entry.Name() == data.SeqNoFileName || entry.Name() == fileLockName {
 			continue
 		}
 		mergeFileNames = append(mergeFileNames, entry.Name())
