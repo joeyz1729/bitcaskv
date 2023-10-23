@@ -6,17 +6,17 @@ import (
 	"path/filepath"
 )
 
-const (
-	bptreeIndexFileName = "bptree-index"
-)
+const bptreeIndexFileName = "bptree-index"
 
 var indexBucketName = []byte("bitcask-index")
 
-// BPlusTree 封装B+树作为内存存储
+// BPlusTree B+ 树索引
+// 主要封装了 go.etcd.io/bbolt 库
 type BPlusTree struct {
 	tree *bbolt.DB
 }
 
+// NewBPlusTree 初始化 B+ 树索引
 func NewBPlusTree(dirPath string, syncWrites bool) *BPlusTree {
 	opts := bbolt.DefaultOptions
 	opts.NoSync = !syncWrites
@@ -25,30 +25,30 @@ func NewBPlusTree(dirPath string, syncWrites bool) *BPlusTree {
 		panic("failed to open bptree")
 	}
 
-	// 创建对应的bucket
+	// 创建对应的 bucket
 	if err := bptree.Update(func(tx *bbolt.Tx) error {
 		_, err := tx.CreateBucketIfNotExists(indexBucketName)
-		if err != nil {
-			return err
-		}
-		return nil
+		return err
 	}); err != nil {
 		panic("failed to create bucket in bptree")
 	}
 
-	return &BPlusTree{
-		tree: bptree,
-	}
+	return &BPlusTree{tree: bptree}
 }
 
-func (bpt *BPlusTree) Put(key []byte, pos *data.LogRecordPos) bool {
+func (bpt *BPlusTree) Put(key []byte, pos *data.LogRecordPos) *data.LogRecordPos {
+	var oldVal []byte
 	if err := bpt.tree.Update(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket(indexBucketName)
+		oldVal = bucket.Get(key)
 		return bucket.Put(key, data.EncodeLogRecordPos(pos))
 	}); err != nil {
 		panic("failed to put value in bptree")
 	}
-	return true
+	if len(oldVal) == 0 {
+		return nil
+	}
+	return data.DecodeLogRecordPos(oldVal)
 }
 
 func (bpt *BPlusTree) Get(key []byte) *data.LogRecordPos {
@@ -66,19 +66,21 @@ func (bpt *BPlusTree) Get(key []byte) *data.LogRecordPos {
 	return pos
 }
 
-func (bpt *BPlusTree) Delete(key []byte) bool {
-	var ok bool
+func (bpt *BPlusTree) Delete(key []byte) (*data.LogRecordPos, bool) {
+	var oldVal []byte
 	if err := bpt.tree.Update(func(tx *bbolt.Tx) error {
 		bucket := tx.Bucket(indexBucketName)
-		if value := bucket.Get(key); len(value) != 0 {
-			ok = true
+		if oldVal = bucket.Get(key); len(oldVal) != 0 {
 			return bucket.Delete(key)
 		}
 		return nil
 	}); err != nil {
-		panic("failed to put value in bptree")
+		panic("failed to delete value in bptree")
 	}
-	return ok
+	if len(oldVal) == 0 {
+		return nil, false
+	}
+	return data.DecodeLogRecordPos(oldVal), true
 }
 
 func (bpt *BPlusTree) Size() int {
@@ -88,28 +90,28 @@ func (bpt *BPlusTree) Size() int {
 		size = bucket.Stats().KeyN
 		return nil
 	}); err != nil {
-		panic("failed to get value in bptree")
+		panic("failed to get size in bptree")
 	}
 	return size
-}
-
-func (bpt *BPlusTree) Close() error {
-	return bpt.tree.Close()
 }
 
 func (bpt *BPlusTree) Iterator(reverse bool) Iterator {
 	return newBptreeIterator(bpt.tree, reverse)
 }
 
+func (bpt *BPlusTree) Close() error {
+	return bpt.tree.Close()
+}
+
 var _ Indexer = (*BPlusTree)(nil)
 
-// BPlusTree 索引迭代器
+// B+树迭代器
 type bptreeIterator struct {
-	tx       *bbolt.Tx
-	cursor   *bbolt.Cursor
-	reverse  bool
-	curKey   []byte
-	curValue []byte
+	tx        *bbolt.Tx
+	cursor    *bbolt.Cursor
+	reverse   bool
+	currKey   []byte
+	currValue []byte
 }
 
 func newBptreeIterator(tree *bbolt.DB, reverse bool) *bptreeIterator {
@@ -122,42 +124,40 @@ func newBptreeIterator(tree *bbolt.DB, reverse bool) *bptreeIterator {
 		cursor:  tx.Bucket(indexBucketName).Cursor(),
 		reverse: reverse,
 	}
-	// 初始化后调用，获取curKey，curValue
 	bpi.Rewind()
 	return bpi
 }
 
 func (bpi *bptreeIterator) Rewind() {
 	if bpi.reverse {
-		bpi.curKey, bpi.curValue = bpi.cursor.Last()
+		bpi.currKey, bpi.currValue = bpi.cursor.Last()
 	} else {
-		bpi.curKey, bpi.curValue = bpi.cursor.First()
+		bpi.currKey, bpi.currValue = bpi.cursor.First()
 	}
-
 }
 
 func (bpi *bptreeIterator) Seek(key []byte) {
-	bpi.curKey, bpi.curValue = bpi.cursor.Seek(key)
+	bpi.currKey, bpi.currValue = bpi.cursor.Seek(key)
 }
 
 func (bpi *bptreeIterator) Next() {
 	if bpi.reverse {
-		bpi.curKey, bpi.curValue = bpi.cursor.Prev()
+		bpi.currKey, bpi.currValue = bpi.cursor.Prev()
 	} else {
-		bpi.curKey, bpi.curValue = bpi.cursor.Next()
+		bpi.currKey, bpi.currValue = bpi.cursor.Next()
 	}
 }
 
 func (bpi *bptreeIterator) Valid() bool {
-	return len(bpi.curKey) != 0
+	return len(bpi.currKey) != 0
 }
 
 func (bpi *bptreeIterator) Key() []byte {
-	return bpi.curKey
+	return bpi.currKey
 }
 
 func (bpi *bptreeIterator) Value() *data.LogRecordPos {
-	return data.DecodeLogRecordPos(bpi.curValue)
+	return data.DecodeLogRecordPos(bpi.currValue)
 }
 
 func (bpi *bptreeIterator) Close() {

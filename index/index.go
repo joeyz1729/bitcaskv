@@ -7,11 +7,11 @@ import (
 )
 
 type Indexer interface {
-	Size() int                                   // 返回索引中一共有多少条数据
-	Put(key []byte, pos *data.LogRecordPos) bool // 向索引存储key的磁盘位置信息
-	Get(key []byte) *data.LogRecordPos           // 获取内存索引中存储的磁盘位置信息
-	Delete(key []byte) bool                      // 删除某个key的索引
-	Iterator(reverse bool) Iterator              // 返回迭代器
+	Size() int                                                 // 返回索引中一共有多少条数据
+	Put(key []byte, pos *data.LogRecordPos) *data.LogRecordPos // 向索引存储key的磁盘位置信息
+	Get(key []byte) *data.LogRecordPos                         // 获取内存索引中存储的磁盘位置信息
+	Delete(key []byte) (*data.LogRecordPos, bool)              // 删除某个key的索引
+	Iterator(reverse bool) Iterator                            // 返回迭代器
 	Close() error
 }
 

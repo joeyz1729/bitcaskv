@@ -8,45 +8,54 @@ import (
 	"sync"
 )
 
-// BTree 封装B树作为内存存储
+// BTree 索引，主要封装了 google 的 btree ku
+// https://github.com/google/btree
 type BTree struct {
 	tree *btree.BTree
 	lock *sync.RWMutex
 }
 
+// NewBTree 新建 BTree 索引结构
 func NewBTree() *BTree {
 	return &BTree{
-		tree: btree.New(32), // 控制B树的节点数量
+		tree: btree.New(32),
 		lock: new(sync.RWMutex),
 	}
 }
 
-func (bt *BTree) Put(key []byte, pos *data.LogRecordPos) bool {
-	item := &Item{key: key, pos: pos}
+func (bt *BTree) Put(key []byte, pos *data.LogRecordPos) *data.LogRecordPos {
+	it := &Item{key: key, pos: pos}
 	bt.lock.Lock()
-	bt.tree.ReplaceOrInsert(item)
+	oldItem := bt.tree.ReplaceOrInsert(it)
 	bt.lock.Unlock()
-	return true
+	if oldItem == nil {
+		return nil
+	}
+	return oldItem.(*Item).pos
 }
 
-func (bt *BTree) Get(key []byte) (pos *data.LogRecordPos) {
-	item := &Item{key: key}
-	btreeItem := bt.tree.Get(item)
+func (bt *BTree) Get(key []byte) *data.LogRecordPos {
+	it := &Item{key: key}
+	btreeItem := bt.tree.Get(it)
 	if btreeItem == nil {
 		return nil
 	}
 	return btreeItem.(*Item).pos
 }
 
-func (bt *BTree) Delete(key []byte) bool {
-	item := &Item{key: key}
+func (bt *BTree) Delete(key []byte) (*data.LogRecordPos, bool) {
+	it := &Item{key: key}
 	bt.lock.Lock()
-	oldItem := bt.tree.Delete(item)
+	oldItem := bt.tree.Delete(it)
 	bt.lock.Unlock()
 	if oldItem == nil {
-		return false
+		return nil, false
 	}
-	return true
+	return oldItem.(*Item).pos, true
+}
+
+func (bt *BTree) Size() int {
+	return bt.tree.Len()
 }
 
 func (bt *BTree) Iterator(reverse bool) Iterator {
@@ -56,10 +65,6 @@ func (bt *BTree) Iterator(reverse bool) Iterator {
 	bt.lock.RLock()
 	defer bt.lock.RUnlock()
 	return newBTreeIterator(bt.tree, reverse)
-}
-
-func (bt *BTree) Size() int {
-	return bt.tree.Len()
 }
 
 func (bt *BTree) Close() error {
