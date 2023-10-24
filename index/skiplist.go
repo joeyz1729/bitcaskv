@@ -35,6 +35,9 @@ func (sl *SkipList) Put(key []byte, pos *data.LogRecordPos) *data.LogRecordPos {
 
 func (sl *SkipList) Get(key []byte) *data.LogRecordPos {
 	element := sl.skl.Get(key)
+	if element == nil {
+		return nil
+	}
 	return element.Value().(*data.LogRecordPos)
 }
 
