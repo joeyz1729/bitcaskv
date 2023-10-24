@@ -10,13 +10,17 @@ import (
 	"time"
 )
 
-var db *bitcask.DB
+var (
+	db        *bitcask.DB
+	indexType = bitcask.TypeBPlusTree
+)
 
 func init() {
 	options := bitcask.DefaultOptions
 	//options.MMapAtStartup = false
 	dir, _ := os.MkdirTemp("", "bitcask-go-bench")
 	options.DirPath = dir
+	options.IndexType = indexType
 	var err error
 	db, err = bitcask.Open(options)
 	if err != nil {
