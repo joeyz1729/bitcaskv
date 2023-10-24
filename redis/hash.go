@@ -2,7 +2,26 @@ package redis
 
 import (
 	bitcask "bitcaskv"
+	"encoding/binary"
 )
+
+type hashInternalKey struct {
+	key     []byte
+	version int64
+	field   []byte
+}
+
+func (hk *hashInternalKey) encode() []byte {
+	buf := make([]byte, len(hk.key)+8+len(hk.field))
+	var index = 0
+	copy(buf[index:index+len(hk.key)], hk.key)
+	index += len(hk.key)
+
+	binary.LittleEndian.PutUint64(buf[index:index+8], uint64(hk.version))
+	index += 8
+	copy(buf[index:index+len(hk.field)], hk.field)
+	return buf
+}
 
 // ======================= Hash 数据结构 =======================
 

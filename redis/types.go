@@ -59,7 +59,7 @@ func (rds *RedisDataStructure) findMetadata(key []byte, dataType redisDataType) 
 
 	if !exist {
 		meta = &metadata{
-			dataType: TypeHash,
+			dataType: dataType,
 			expire:   0,
 			version:  time.Now().UnixNano(),
 			size:     0,
