@@ -12,7 +12,7 @@ import (
 
 var (
 	db        *bitcask.DB
-	indexType = bitcask.TypeBPlusTree
+	indexType = bitcask.TypeSkipList1
 )
 
 func init() {

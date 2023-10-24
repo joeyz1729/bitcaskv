@@ -22,6 +22,7 @@ const (
 	TypeART
 	TypeBPlusTree
 	TypeSkipList
+	TypeSkipList1
 )
 
 // NewIndexer 根据类型初始化索引
@@ -35,6 +36,8 @@ func NewIndexer(typ IndexerType, dirPath string, syncWrites bool) Indexer {
 		return NewBPlusTree(dirPath, syncWrites)
 	case TypeSkipList:
 		return NewSkipList()
+	case TypeSkipList1:
+		return NewSkipList1()
 	default:
 		panic("unsupported indexer type")
 	}

@@ -31,6 +31,8 @@ const (
 	TypeBTree IndexerType = iota + 1
 	TypeART
 	TypeBPlusTree
+	TypeSkipList
+	TypeSkipList1
 )
 
 var DefaultOptions = Options{

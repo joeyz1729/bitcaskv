@@ -2,7 +2,6 @@ package ds
 
 import (
 	"bytes"
-	"math"
 	"math/rand"
 	"time"
 )
@@ -10,8 +9,8 @@ import (
 type handleEle func(e *Element) bool
 
 const (
-	maxLevel    int     = 18         // 跳表的最大层数
-	probability float64 = 1 / math.E // 层数的概率
+	maxLevel    int     = 18  // 跳表的最大层数
+	probability float64 = 0.5 // 层数的概率
 )
 
 type Element struct {
