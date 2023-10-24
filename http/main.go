@@ -34,7 +34,7 @@ func main() {
 }
 
 type GetForm struct {
-	Key string `json:"keys" binding:"required"`
+	Key string `json:"key" binding:"required"`
 }
 
 type DeleteForm struct {
@@ -77,7 +77,6 @@ func putHandler(c *gin.Context) {
 		}
 	}
 	c.JSON(http.StatusOK, &ResponseData{Message: "success"})
-
 }
 
 func deleteHandler(c *gin.Context) {
