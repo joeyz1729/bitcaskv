@@ -71,3 +71,7 @@ func (rds *RedisDataStructure) findMetadata(key []byte, dataType redisDataType) 
 	}
 	return meta, nil
 }
+
+func (rds *RedisDataStructure) Close() error {
+	return rds.db.Close()
+}
