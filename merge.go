@@ -230,6 +230,7 @@ func (db *DB) loadMergeFiles() error {
 	return nil
 }
 
+// getNonMergeFileId 获取第一个没有参与merge的文件id
 func (db *DB) getNonMergeFileId(dirPath string) (uint32, error) {
 	mergeFinishedFile, err := data.OpenMergeFinishedFile(dirPath)
 	if err != nil {

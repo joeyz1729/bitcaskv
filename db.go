@@ -146,6 +146,88 @@ func Open(options Options) (*DB, error) {
 	return db, nil
 }
 
+// Close 关闭数据库实例，
+func (db *DB) Close() error {
+	defer func() {
+		if err := db.fileLock.Unlock(); err != nil {
+			panic(fmt.Sprintf("failed to unlock the directory, %v", err))
+		}
+	}()
+	if db.activeFile == nil {
+		// TODO, 不应该也关闭older吗
+		return nil
+	}
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	// 关闭索引文件，针对BPlusTree
+	if err := db.index.Close(); err != nil {
+		return err
+	}
+
+	// 保存事务序列号
+	seqNoFile, err := data.OpenSeqNoFile(db.options.DirPath)
+	if err != nil {
+		return err
+	}
+	record := &data.LogRecord{
+		Key:   []byte(seqNoKey),
+		Value: []byte(strconv.FormatUint(db.seqNo, 10)),
+	}
+	encRecord, _ := data.EncodeLogRecord(record)
+	if err := seqNoFile.Write(encRecord); err != nil {
+		return err
+	}
+	if err := seqNoFile.Sync(); err != nil {
+		return err
+	}
+
+	if err := db.activeFile.Close(); err != nil {
+		return err
+	}
+
+	for _, file := range db.olderFiles {
+		if err := file.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Sync 将此时的active file持久化
+func (db *DB) Sync() error {
+	if db.activeFile == nil {
+		return nil
+	}
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	return db.activeFile.Sync()
+}
+
+// Stat 返回数据库的状态
+func (db *DB) Stat() *Stat {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+
+	var dataFiles = uint(len(db.olderFiles))
+	if db.activeFile != nil {
+		dataFiles += 1
+	}
+
+	dirSize, err := utils.DirSize(db.options.DirPath)
+	if err != nil {
+		panic(fmt.Sprintf("failed to get dir size: %v", err))
+	}
+
+	return &Stat{
+		KeyNum:          uint(db.index.Size()),
+		DataFileNum:     dataFiles,
+		ReclaimableSize: db.reclaimSize,
+		DiskSize:        dirSize,
+	}
+
+}
+
 // Put 将kv键值对写入到数据库中
 func (db *DB) Put(key []byte, value []byte) error {
 	if len(key) == 0 {
@@ -169,6 +251,7 @@ func (db *DB) Put(key []byte, value []byte) error {
 	return nil
 }
 
+// Get 从数据库中获取对应的value
 func (db *DB) Get(key []byte) ([]byte, error) {
 	// TODO
 	if len(key) == 0 {
@@ -211,33 +294,7 @@ func (db *DB) Fold(fn func(key []byte, value []byte) bool) error {
 	return nil
 }
 
-// getValueByPosition 通过位置信息获取log record
-func (db *DB) getValueByPosition(pos *data.LogRecordPos) (value []byte, err error) {
-
-	if pos == nil {
-		return nil, ErrKeyNotFound
-	}
-	// 根据位置信息查找数据文件
-	var dataFile *data.DataFile
-	if db.activeFile.FileId == pos.Fid {
-		dataFile = db.activeFile
-	} else {
-		dataFile = db.olderFiles[pos.Fid]
-	}
-	if dataFile == nil {
-		return nil, ErrDataFileNotFound
-	}
-	// 根据偏移量从数据文件中读取
-	record, _, err := dataFile.ReadLogRecord(pos.Offset)
-	if err != nil {
-		return nil, err
-	}
-	if record.Type == data.LogRecordDeleted {
-		return nil, ErrKeyNotFound
-	}
-	return record.Value, nil
-}
-
+// Delete 删除指定的文件
 func (db *DB) Delete(key []byte) error {
 	if len(key) == 0 {
 		return ErrKeyIsEmpty
@@ -266,6 +323,33 @@ func (db *DB) Delete(key []byte) error {
 	}
 
 	return nil
+}
+
+// getValueByPosition 通过位置信息获取log record
+func (db *DB) getValueByPosition(pos *data.LogRecordPos) (value []byte, err error) {
+
+	if pos == nil {
+		return nil, ErrKeyNotFound
+	}
+	// 根据位置信息查找数据文件
+	var dataFile *data.DataFile
+	if db.activeFile.FileId == pos.Fid {
+		dataFile = db.activeFile
+	} else {
+		dataFile = db.olderFiles[pos.Fid]
+	}
+	if dataFile == nil {
+		return nil, ErrDataFileNotFound
+	}
+	// 根据偏移量从数据文件中读取
+	record, _, err := dataFile.ReadLogRecord(pos.Offset)
+	if err != nil {
+		return nil, err
+	}
+	if record.Type == data.LogRecordDeleted {
+		return nil, ErrKeyNotFound
+	}
+	return record.Value, nil
 }
 
 // appendLogRecordWithLock 添加数据并返回记录的位置信息
@@ -337,6 +421,7 @@ func (db *DB) setActiveDataFile() error {
 	return nil
 }
 
+// checkOptions 检查数据库启动时的设置合法性
 func checkOptions(options Options) error {
 	if options.DirPath == "" {
 		return errors.New("database dir path is empty")
@@ -345,7 +430,7 @@ func checkOptions(options Options) error {
 		return errors.New("database data file size must be greater than 0")
 	}
 	if options.DataFileMergeRatio > 1 || options.DataFileMergeRatio < 0 {
-		return errors.New("invalid merge ratio, must between 0 and 1")
+		return ErrInvalidMergeRatio
 	}
 	return nil
 }
@@ -392,6 +477,53 @@ func (db *DB) loadDataFiles() error {
 	return nil
 }
 
+// loadSeqNo 加载事务number
+func (db *DB) loadSeqNo() error {
+	fileName := filepath.Join(db.options.DirPath, data.SeqNoFileName)
+	if _, err := os.Stat(fileName); os.IsNotExist(err) {
+		return nil
+	}
+
+	seqNoFile, err := data.OpenSeqNoFile(db.options.DirPath)
+	if err != nil {
+		return err
+	}
+	record, _, err := seqNoFile.ReadLogRecord(0)
+	seqNo, err := strconv.ParseUint(string(record.Value), 10, 64)
+	if err != nil {
+		return err
+	}
+	db.seqNo = seqNo
+	db.seqNoFileExists = true
+
+	return os.Remove(fileName)
+}
+
+// resetIOType 将IO类型设置为标准 File IO
+func (db *DB) resetIOType() error {
+	if db.activeFile == nil {
+		return nil
+	}
+	if err := db.activeFile.SetIOManager(db.options.DirPath, fio.StandardFIO); err != nil {
+		return err
+	}
+	for _, dataFile := range db.olderFiles {
+		if err := dataFile.SetIOManager(db.options.DirPath, fio.StandardFIO); err != nil {
+			return err
+		}
+	}
+	return nil
+
+}
+
+// Backup 数据库备份
+func (db *DB) Backup(dest string) error {
+	db.mu.Lock()
+	defer db.mu.Unlock()
+	return utils.CopyDir(db.options.DirPath, dest, []string{fileLockName})
+}
+
+// loadIndexFromDataFiles 从数据文件中加载内存索引，仅 BPlusTree 内存索引有效
 func (db *DB) loadIndexFromDataFiles() error {
 	// 没有文件，说明数据库是空的，直接返回
 	if len(db._fileIds) == 0 {
@@ -493,127 +625,4 @@ func (db *DB) loadIndexFromDataFiles() error {
 	// 更新事务序列号
 	db.seqNo = currentSeqNo
 	return nil
-}
-
-func (db *DB) Close() error {
-	defer func() {
-		if err := db.fileLock.Unlock(); err != nil {
-			panic(fmt.Sprintf("failed to unlock the directory, %v", err))
-		}
-	}()
-	if db.activeFile == nil {
-		// TODO, 不应该也关闭older吗
-		return nil
-	}
-	db.mu.Lock()
-	defer db.mu.Unlock()
-
-	// 关闭索引文件，针对BPlusTree
-	if err := db.index.Close(); err != nil {
-		return err
-	}
-
-	// 保存事务序列号
-	seqNoFile, err := data.OpenSeqNoFile(db.options.DirPath)
-	if err != nil {
-		return err
-	}
-	record := &data.LogRecord{
-		Key:   []byte(seqNoKey),
-		Value: []byte(strconv.FormatUint(db.seqNo, 10)),
-	}
-	encRecord, _ := data.EncodeLogRecord(record)
-	if err := seqNoFile.Write(encRecord); err != nil {
-		return err
-	}
-	if err := seqNoFile.Sync(); err != nil {
-		return err
-	}
-
-	if err := db.activeFile.Close(); err != nil {
-		return err
-	}
-
-	for _, file := range db.olderFiles {
-		if err := file.Close(); err != nil {
-			return err
-		}
-	}
-	return nil
-}
-
-func (db *DB) Sync() error {
-	if db.activeFile == nil {
-		return nil
-	}
-	db.mu.Lock()
-	defer db.mu.Unlock()
-	return db.activeFile.Sync()
-}
-
-func (db *DB) Stat() *Stat {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-
-	var dataFiles = uint(len(db.olderFiles))
-	if db.activeFile != nil {
-		dataFiles += 1
-	}
-
-	dirSize, err := utils.DirSize(db.options.DirPath)
-	if err != nil {
-		panic(fmt.Sprintf("failed to get dir size: %v", err))
-	}
-
-	return &Stat{
-		KeyNum:          uint(db.index.Size()),
-		DataFileNum:     dataFiles,
-		ReclaimableSize: db.reclaimSize,
-		DiskSize:        dirSize,
-	}
-
-}
-
-func (db *DB) loadSeqNo() error {
-	fileName := filepath.Join(db.options.DirPath, data.SeqNoFileName)
-	if _, err := os.Stat(fileName); os.IsNotExist(err) {
-		return nil
-	}
-
-	seqNoFile, err := data.OpenSeqNoFile(db.options.DirPath)
-	if err != nil {
-		return err
-	}
-	record, _, err := seqNoFile.ReadLogRecord(0)
-	seqNo, err := strconv.ParseUint(string(record.Value), 10, 64)
-	if err != nil {
-		return err
-	}
-	db.seqNo = seqNo
-	db.seqNoFileExists = true
-
-	return os.Remove(fileName)
-}
-
-// resetIOType 将IO类型设置为标准 File IO
-func (db *DB) resetIOType() error {
-	if db.activeFile == nil {
-		return nil
-	}
-	if err := db.activeFile.SetIOManager(db.options.DirPath, fio.StandardFIO); err != nil {
-		return err
-	}
-	for _, dataFile := range db.olderFiles {
-		if err := dataFile.SetIOManager(db.options.DirPath, fio.StandardFIO); err != nil {
-			return err
-		}
-	}
-	return nil
-
-}
-
-func (db *DB) Backup(dest string) error {
-	db.mu.Lock()
-	defer db.mu.Unlock()
-	return utils.CopyDir(db.options.DirPath, dest, []string{fileLockName})
 }
