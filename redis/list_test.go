@@ -15,6 +15,9 @@ func TestRedisDataStructure_LPop(t *testing.T) {
 	rds, err := NewRedisDataStructure(opts)
 	assert.Nil(t, err)
 
+	res0, err := rds.LPop(utils.GetTestKey(1))
+	assert.Nil(t, res0)
+	assert.Equal(t, err, bitcask.ErrKeyNotFound)
 	// 添加数据
 	res, err := rds.LPush(utils.GetTestKey(1), []byte("val-1"))
 	assert.Nil(t, err)
@@ -48,6 +51,9 @@ func TestRedisDataStructure_RPop(t *testing.T) {
 	rds, err := NewRedisDataStructure(opts)
 	assert.Nil(t, err)
 
+	res0, err := rds.RPop(utils.GetTestKey(1))
+	assert.Nil(t, res0)
+	assert.Equal(t, err, bitcask.ErrKeyNotFound)
 	res, err := rds.RPush(utils.GetTestKey(1), []byte("val-1"))
 	assert.Nil(t, err)
 	assert.Equal(t, uint32(1), res)

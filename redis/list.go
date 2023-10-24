@@ -90,13 +90,21 @@ func (rds *RedisDataStructure) popInner(key []byte, isLeft bool) ([]byte, error)
 		return nil, err
 	}
 
+	// TODO
+	// 是否需要删除
+	wb := rds.db.NewWriteBatch(bitcask.DefaultWriteBatchOptions)
 	meta.size--
 	if isLeft {
 		meta.head++
 	} else {
 		meta.tail--
 	}
-	if err = rds.db.Put(key, meta.encode()); err != nil {
+	//if err = rds.db.Put(key, meta.encode()); err != nil {
+	//	return nil, err
+	//}
+	_ = wb.Put(key, meta.encode())
+	_ = wb.Delete(lk.encode())
+	if err = wb.Commit(); err != nil {
 		return nil, err
 	}
 	return element, nil
